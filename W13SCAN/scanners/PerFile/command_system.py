@@ -21,6 +21,10 @@ class W13SCAN(PluginBase):
     name = '系统命令注入'
     desc = '''测试系统命令注入，支持Windows/Linux,回显型的命令注入'''
 
+    def __init__(self):
+        super().__init__()
+        self._compiled_patterns = {}
+
     def paramsCombination(self, data: dict, place=PLACE.GET, url_flag={}, hint=POST_HINT.NORMAL, urlsafe='/\\'):
         """
         组合dict参数,将相关类型参数组合成requests认识的,防止request将参数进行url转义
@@ -125,8 +129,13 @@ class W13SCAN(PluginBase):
                 if not r:
                     continue
                 html1 = r.text
+                
+                # 使用预编译的正则表达式提高性能
                 for rule in re_list:
-                    if re.search(rule, html1, re.I | re.S | re.M):
+                    if rule not in self._compiled_patterns:
+                        self._compiled_patterns[rule] = re.compile(rule, re.I | re.S | re.M)
+                    
+                    if self._compiled_patterns[rule].search(html1):
                         result = self.new_result()
                         result.init_info(url, "可执行任意系统命令", VulType.CMD_INNJECTION)
                         result.add_detail("payload请求", r.reqinfo, generateResponse(r),

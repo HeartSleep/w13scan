@@ -18,6 +18,10 @@ from lib.core.settings import DEFAULT_GET_POST_DELIMITER, DEFAULT_COOKIE_DELIMIT
 class W13SCAN(PluginBase):
     name = '路径穿越插件'
 
+    def __init__(self):
+        super().__init__()
+        self._compiled_regexes = None
+
     def paramsCombination(self, data: dict, place=PLACE.GET, payloads=[], hint=POST_HINT.NORMAL, urlsafe='/\\'):
         """
         组合dict参数,将相关类型参数组合成requests认识的,防止request将参数进行url转义
@@ -107,6 +111,11 @@ class W13SCAN(PluginBase):
             '/bin/(bash|sh)[^\r\n<>]*[\r\n]',
             '\[boot loader\][^\r\n<>]*[\r\n]'
         ]
+        
+        # 预编译正则表达式以提高性能
+        if self._compiled_regexes is None:
+            self._compiled_regexes = [re.compile(regex, re.I | re.S | re.M) for regex in regexArray]
+        
         iterdatas = self.generateItemdatas()
         _payloads = self.generate_payloads()
 
@@ -117,6 +126,8 @@ class W13SCAN(PluginBase):
                 if not r:
                     continue
                 html1 = r.text
+                
+                # 快速检查：先查找简单字符串
                 for plain in plainArray:
                     if plain in html1:
                         result = ResultObject(self)
@@ -125,11 +136,13 @@ class W13SCAN(PluginBase):
                                           "探测payload:{},并发现回显{}".format(payload, plain), key, new_value, positon)
                         self.success(result)
                         return
-                for regex in regexArray:
-                    if re.search(regex, html1, re.I | re.S | re.M):
+                
+                # 使用预编译的正则表达式
+                for i, compiled_regex in enumerate(self._compiled_regexes):
+                    if compiled_regex.search(html1):
                         result = ResultObject(self)
                         result.init_info(self.requests.url, "目录穿越导致任意文件被读取", VulType.PATH_TRAVERSAL)
                         result.add_detail("payload探测", r.reqinfo, generateResponse(r),
-                                          "探测payload:{},并发现正则回显{}".format(payload, regex), key, new_value, positon)
+                                          "探测payload:{},并发现正则回显{}".format(payload, regexArray[i]), key, new_value, positon)
                         self.success(result)
                         return

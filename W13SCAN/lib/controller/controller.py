@@ -70,23 +70,30 @@ def start():
 def task_run():
     while KB["continue"] or not KB["task_queue"].empty():
         poc_module_name, request, response = KB["task_queue"].get()
-        KB.lock.acquire()
-        KB.running += 1
-        if poc_module_name not in KB.running_plugins:
-            KB.running_plugins[poc_module_name] = 0
-        KB.running_plugins[poc_module_name] += 1
-        KB.lock.release()
+        
+        with KB.lock:
+            KB.running += 1
+            if poc_module_name not in KB.running_plugins:
+                KB.running_plugins[poc_module_name] = 0
+            KB.running_plugins[poc_module_name] += 1
+        
         printProgress()
-        poc_module = copy.deepcopy(KB["registered"][poc_module_name])
+        
+        # 优化：只在需要时创建模块实例副本
+        poc_module_class = KB["registered"][poc_module_name].__class__
+        poc_module = poc_module_class()
+        poc_module.type = KB["registered"][poc_module_name].type
+        poc_module.path = KB["registered"][poc_module_name].path
+        
         poc_module.execute(request, response)
-        KB.lock.acquire()
-        KB.finished += 1
-        KB.running -= 1
-        KB.running_plugins[poc_module_name] -= 1
-        if KB.running_plugins[poc_module_name] == 0:
-            del KB.running_plugins[poc_module_name]
-
-        KB.lock.release()
+        
+        with KB.lock:
+            KB.finished += 1
+            KB.running -= 1
+            KB.running_plugins[poc_module_name] -= 1
+            if KB.running_plugins[poc_module_name] == 0:
+                del KB.running_plugins[poc_module_name]
+        
         printProgress()
     printProgress()
     # TODO
@@ -94,16 +101,15 @@ def task_run():
 
 
 def printProgress():
-    KB.lock.acquire()
-    if conf.debug:
-        # 查看当前正在运行的插件
-        KB.output.log(repr(KB.running_plugins))
-    msg = '%d success | %d running | %d remaining | %s scanned in %.2f seconds' % (
-        KB.output.count(), KB.running, KB.task_queue.qsize(), KB.finished, time.time() - KB.start_time)
+    with KB.lock:
+        if conf.debug:
+            # 查看当前正在运行的插件
+            KB.output.log(repr(KB.running_plugins))
+        msg = '%d success | %d running | %d remaining | %s scanned in %.2f seconds' % (
+            KB.output.count(), KB.running, KB.task_queue.qsize(), KB.finished, time.time() - KB.start_time)
 
-    _ = '\r' + ' ' * (KB['console_width'][0] - len(msg)) + msg
-    dataToStdout(_)
-    KB.lock.release()
+        _ = '\r' + ' ' * (KB['console_width'][0] - len(msg)) + msg
+        dataToStdout(_)
 
 
 def task_push(plugin_type, request, response):

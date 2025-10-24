@@ -25,9 +25,14 @@ from lib.helper.jscontext import SearchInputInScript
 class W13SCAN(PluginBase):
     name = 'XSS语义化探测插件'
 
+    def __init__(self):
+        super().__init__()
+        self._search_cache = {}
+
     def init(self):
         self.result = ResultObject(self)
         self.result.init_info(self.requests.url, "XSS脚本注入", VulType.XSS)
+        self._search_cache.clear()
 
     def audit(self):
 
@@ -65,16 +70,24 @@ class W13SCAN(PluginBase):
                 data[k] = xsschecker
                 r1 = self.req(positon, data)
 
-                if not re.search(xsschecker, r1.text, re.I):
+                # 快速检查：使用更高效的in操作
+                r1_text_lower = r1.text.lower()
+                if xsschecker.lower() not in r1_text_lower:
                     continue
+                
                 html_type = r1.headers.get("Content-Type", "").lower()
 
                 XSS_LIMIT_CONTENT_TYPE = conf.XSS_LIMIT_CONTENT_TYPE
                 if XSS_LIMIT_CONTENT_TYPE and 'html' not in html_type:
                     continue
 
-                # 反射位置查找
-                locations = SearchInputInResponse(xsschecker, r1.text)
+                # 反射位置查找（使用缓存）
+                cache_key = (xsschecker, id(r1.text))
+                if cache_key in self._search_cache:
+                    locations = self._search_cache[cache_key]
+                else:
+                    locations = SearchInputInResponse(xsschecker, r1.text)
+                    self._search_cache[cache_key] = locations
 
                 if len(locations) == 0:
                     # 找不到反射位置，找下自己原因?

@@ -65,18 +65,24 @@ class W13SCAN(PluginBase):
         p = urlparse(url)
         domain = "{}://{}".format(p.scheme, p.netloc)
         if KB["spiderset"].add(domain, 'PerServer'):
-            req = requests.get(domain, headers=headers, allow_redirects=False)
-            fake_req = FakeReq(domain, headers, HTTPMETHOD.GET, "")
-            fake_resp = FakeResp(req.status_code, req.content, req.headers)
-            task_push('PerServer', fake_req, fake_resp)
+            try:
+                req = requests.get(domain, headers=headers, allow_redirects=False, timeout=10)
+                fake_req = FakeReq(domain, headers, HTTPMETHOD.GET, "")
+                fake_resp = FakeResp(req.status_code, req.content, req.headers)
+                task_push('PerServer', fake_req, fake_resp)
+            except Exception as e:
+                logger.debug("PerServer request failed for {}: {}".format(domain, str(e)))
 
         # Collect directory from response
         urls = set(get_parent_paths(url))
         for parent_url in urls:
             if not KB["spiderset"].add(parent_url, 'get_link_directory'):
                 continue
-            req = requests.get(parent_url, headers=headers, allow_redirects=False)
-            if KB["spiderset"].add(req.url, 'PerFolder'):
-                fake_req = FakeReq(req.url, headers, HTTPMETHOD.GET, "")
-                fake_resp = FakeResp(req.status_code, req.content, req.headers)
-                task_push('PerFolder', fake_req, fake_resp)
+            try:
+                req = requests.get(parent_url, headers=headers, allow_redirects=False, timeout=10)
+                if KB["spiderset"].add(req.url, 'PerFolder'):
+                    fake_req = FakeReq(req.url, headers, HTTPMETHOD.GET, "")
+                    fake_resp = FakeResp(req.status_code, req.content, req.headers)
+                    task_push('PerFolder', fake_req, fake_resp)
+            except Exception as e:
+                logger.debug("PerFolder request failed for {}: {}".format(parent_url, str(e)))
