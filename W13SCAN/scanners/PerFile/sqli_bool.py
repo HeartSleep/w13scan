@@ -29,6 +29,7 @@ class W13SCAN(PluginBase):
 
         self.retry = 6  # 重试次数
         self.dynamic = []
+        self._response_cache = {}  # 缓存响应内容
 
     def findDynamicContent(self, firstPage, secondPage):
         ret = findDynamicContent(firstPage, secondPage)
@@ -64,6 +65,11 @@ class W13SCAN(PluginBase):
         r2 = self.req(positon, url_dict2str(data,positon))
         falsePage = self.removeDynamicContent(r2.text)
 
+        # 快速长度检查 - 避免不必要的序列比较
+        if len(falsePage) == len(self.resp_str):
+            if falsePage == self.resp_str:
+                return False
+
         try:
             self.seqMatcher.set_seq1(self.resp_str)
             self.seqMatcher.set_seq2(falsePage)
@@ -78,8 +84,10 @@ class W13SCAN(PluginBase):
         r = self.req(positon, url_dict2str(data,positon))
         truePage = self.removeDynamicContent(r.text)
 
-        if truePage == falsePage:
-            return False
+        # 快速长度和内容检查
+        if len(truePage) == len(falsePage):
+            if truePage == falsePage:
+                return False
 
         try:
             self.seqMatcher.set_seq1(self.resp_str or "")

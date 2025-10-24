@@ -44,24 +44,30 @@ def etl(str, onlyNUM=False):
     :param onlyNUM:只换数字
     :return:
     '''
-    chars = ""
-    for c in str:
-        c = c.lower()
-        if not onlyNUM:
-            if ord('a') <= ord(c) <= ord('z') and not onlyNUM:
-                chars += 'A'
-            elif ord('0') <= ord(c) <= ord('9'):
-                chars += 'N'
+    if not str:
+        return ""
+    
+    str_lower = str.lower()
+    chars = []
+    
+    if not onlyNUM:
+        for c in str_lower:
+            if 'a' <= c <= 'z':
+                chars.append('A')
+            elif '0' <= c <= '9':
+                chars.append('N')
             elif c in Chars:
-                chars += 'T'
+                chars.append('T')
             else:
-                chars += 'C'
-        else:
-            if ord('0') <= ord(c) <= ord('9'):
-                chars += 'N'
+                chars.append('C')
+    else:
+        for c in str_lower:
+            if '0' <= c <= '9':
+                chars.append('N')
             else:
-                chars += c
-    return chars
+                chars.append(c)
+    
+    return ''.join(chars)
 
 
 def url_compare(url, link):
@@ -101,7 +107,7 @@ def reduce_urls(ori_urls):
 
 class SpiderSet(object):
     """
-    基于Google Simhash算法
+    基于Google Simhash算法，优化版本使用缓存提高性能
     """
 
     def __init__(self):
@@ -111,7 +117,18 @@ class SpiderSet(object):
             "PerServer": {},
             "PostScan": {}
         }
+        self.simhash_cache = {}
         self.lock = threading.Lock()
+
+    def _get_simhash(self, etl_url):
+        """
+        获取URL的Simhash值，使用缓存避免重复计算
+        :param etl_url: ETL处理后的URL
+        :return: Simhash对象
+        """
+        if etl_url not in self.simhash_cache:
+            self.simhash_cache[etl_url] = Simhash(etl_url)
+        return self.simhash_cache[etl_url]
 
     def add(self, url, plugin):
         """
@@ -126,19 +143,36 @@ class SpiderSet(object):
             plugin = str(plugin)
 
         self.lock.acquire()
-        if plugin not in self.spider_list:
-            self.spider_list[plugin] = {}
-        netloc = urlparse.urlparse(url).netloc
-        if netloc not in self.spider_list[plugin]:
-            self.spider_list[plugin][netloc] = []
-        etl = url_etl(url)  # url泛化表达式
-        score = 0
-        for etl_url in self.spider_list[plugin][netloc]:
-            if not url_compare(etl, etl_url):
-                score += 1
-        if score == len(self.spider_list[plugin][netloc]):
-            self.spider_list[plugin][netloc].append(etl)
-        else:
-            ret = False
-        self.lock.release()
+        try:
+            if plugin not in self.spider_list:
+                self.spider_list[plugin] = {}
+            netloc = urlparse.urlparse(url).netloc
+            if netloc not in self.spider_list[plugin]:
+                self.spider_list[plugin][netloc] = []
+            
+            etl = url_etl(url)  # url泛化表达式
+            
+            # 提前计算当前URL的Simhash，只计算一次
+            etl_simhash = self._get_simhash(etl)
+            
+            # 快速检查是否已存在完全相同的ETL
+            if etl in self.spider_list[plugin][netloc]:
+                ret = False
+            else:
+                # 使用预计算的Simhash进行比较
+                is_duplicate = False
+                for existing_etl in self.spider_list[plugin][netloc]:
+                    existing_simhash = self._get_simhash(existing_etl)
+                    dis = etl_simhash.distance(existing_simhash)
+                    if -2 < dis < 5:
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    self.spider_list[plugin][netloc].append(etl)
+                else:
+                    ret = False
+        finally:
+            self.lock.release()
+        
         return ret
